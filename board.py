@@ -38,6 +38,10 @@ class Board:
     def all_full(self) -> bool:
         return np.all(self.top >= self.height)
 
+    def within_bounds(self, position: np.ndarray) -> bool:
+        y, x = position
+        return 0 <= x and x < self.width and 0 <= y and y < self.height
+
     def __getitem__(self, item) -> int:
         return self.stones[item]
 
