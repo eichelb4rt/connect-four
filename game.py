@@ -1,4 +1,5 @@
 import math
+import time
 import numpy as np
 from enum import Enum
 import directions
@@ -94,84 +95,78 @@ def evaluate(board: Board, player: int, on_turn: int) -> float:
 def search_tree(root_board: Board, player: int) -> tuple[float, int]:
     """Evaluates the `board` for `player`, when it's `player`s turn. Returns evaluation and best move."""
 
-    # save ids instead of whole boards and start building the search tree
-    boards: Identifier[Board] = Identifier()
-    boards.add(root_board)
-    root_node = boards.id[root_board]
     # we start with depth = 0
     depth = 0
     # stores node ids and their depth in the search tree, and the column that was changed
     # root did not change any position
-    node_list: list[tuple[int, int, int]] = [(root_node, depth, -1)]
-    evaluated: set[int] = set()
-    evaluation: dict[int, float] = {}
-    parent: dict[int, int] = {}
-    while root_node not in evaluated:
+    node_list: list[tuple[Board, int, int]] = [(root_board, depth, -1)]
+    evaluated: set[Board] = set()
+    evaluation: dict[Board, float] = {}
+    parent: dict[Board, Board] = {}
+    while root_board not in evaluated:
         # save previous depth so we know when we go back up
         previous_depth = depth
         # pop top node, depth, changed position
-        node, depth, changed_column = node_list[-1]
+        board, depth, changed_column = node_list[-1]
         # if we just went back up in the search tree, then x has been fully evaluated, check the loop condition again maybe
         if previous_depth > depth:
-            evaluated.add(node)
+            evaluated.add(board)
             continue
         # maximizer (even depth): it's my players turn
         # minimizer (odd depth): it's the enemy players turn
         on_turn = player if depth % 2 == 0 else -player
         # if node has an evaluation
-        if node in evaluated:
-            p = parent[node]
+        if board in evaluated:
+            p = parent[board]
             # x in max node -> parent in min node
             # remove node from list and get a new one
-            if (player == on_turn and evaluation[node] < evaluation[p]) or (player != on_turn and evaluation[node] > evaluation[p]):
-                evaluation[p] = evaluation[node]
-                if p == root_node:
+            if (player == on_turn and evaluation[board] < evaluation[p]) or (player != on_turn and evaluation[board] > evaluation[p]):
+                evaluation[p] = evaluation[board]
+                if p == root_board:
                     best_move = changed_column
             del node_list[-1]
             # also we can forget about the board configuration
-            del boards[node]
+            del board
             continue
 
         # x was not evaluated yet:
         # if x is a leaf, evaluate it
         # root didn't change any column, it can't be a leaf.
         if changed_column != -1:
-            x, y = changed_column, boards[node].top[changed_column] - 1
+            x, y = changed_column, board.top[changed_column] - 1
             stone_position = np.array([y, x])
-            if winning_on(boards[node], player, stone_position):
-                evaluation[node] = 1
-                evaluated.add(node)
+            if winning_on(board, player, stone_position):
+                evaluation[board] = 1
+                evaluated.add(board)
                 continue
-            elif winning_on(boards[node], -player, stone_position):
-                evaluation[node] = -1
-                evaluated.add(node)
+            elif winning_on(board, -player, stone_position):
+                evaluation[board] = -1
+                evaluated.add(board)
                 continue
 
         # if we don't want to expand the node, evaluate it using the evaluation function
         if depth >= MAX_DEPTH:
-            evaluation[node] = evaluate(boards[node], player, on_turn)
-            evaluated.add(node)
+            evaluation[board] = evaluate(board, player, on_turn)
+            evaluated.add(board)
             continue
 
         # we want to expand the node
         # maximizer: init with -infty
         # minimizer: init with infty
-        evaluation[node] = -math.inf if player == on_turn else math.inf
+        evaluation[board] = -math.inf if player == on_turn else math.inf
         # append children to node list
         for column in range(root_board.width):
             # skip full columns
-            if boards[node].full(column):
+            if board.full(column):
                 continue
-            child_board = boards[node].copy()
+            child_board = board.copy()
             # add a stone by on_turn in the column
             child_board.put(on_turn, column)
             # assign an id to the child board
-            boards.add(child_board)
-            child_id = boards.id[child_board]
-            parent[child_id] = node
+            parent[child_board] = board
             # add child to node list
-            node_list.append((child_id, depth + 1, column))
-    return evaluation[root_node], best_move
+            node_list.append((child_board, depth + 1, column))
+    return evaluation[root_board], best_move
 
 
 class Game:
@@ -228,8 +223,11 @@ class Game:
         """Gets the move the npc wants to play."""
 
         # search game tree for options and maximize evaluation
+        start = time.time()
         evaluation, best_move = search_tree(self.board, player)
+        end = time.time()
         print(f"Best move evaluation: {evaluation}")
+        print(f"Time needed: {end - start}")
         return best_move
 
     def correct_input(self, player_input: str) -> tuple[bool, str]:
