@@ -3,7 +3,7 @@ import numpy as np
 
 from board import Board, evaluate, winning_on
 
-MAX_DEPTH = 5
+MAX_DEPTH = 3
 
 IS_MAX_NODE = lambda d: d % 2 == 0
 IS_MIN_NODE = lambda d: d % 2 == 1
@@ -60,14 +60,16 @@ class SearchTree:
                 continue
 
             # node has an evaluation
+            parent = self.parent[board]
             # maybe prune
             self.just_pruned = False
             if self.prunable(board):
-                self.prune(self.parent[board])
+                if repr(board) == "(o,,o,o,xxxx,,)" or repr(self.parent) == "(o,,o,o,xxxx,,)":
+                    self.collect_alpha_beta(board)
+                self.prune(parent)
                 self.just_pruned = True
                 continue
             # update parent
-            parent = self.parent[board]
             overwritten = self.update_parent(board, parent)
             # if parent was overwritten, update alpha/beta
             if overwritten:
@@ -175,14 +177,14 @@ class SearchTree:
         del self.worklist_changed[-1]
 
     def prune(self, board: Board):
-        """Prunes all chilren of that board from the node list."""
+        """Prunes a board and all its chilren from the node list."""
 
         index = self.worklist_nodes.index(board)
         if self.log:
-            print(f"Pruned: {self.worklist_nodes[index + 1:]}")
-        del self.worklist_nodes[index + 1:]
-        del self.worklist_depths[index + 1:]
-        del self.worklist_changed[index + 1:]
+            print(f"Pruned: {self.worklist_nodes[index:]}")
+        del self.worklist_nodes[index:]
+        del self.worklist_depths[index:]
+        del self.worklist_changed[index:]
 
     def update_parent(self, board: Board, parent: Board) -> bool:
         """Updates parent of any node. Returns `True` if it was overwritten."""
