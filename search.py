@@ -3,7 +3,7 @@ import numpy as np
 
 from board import Board, evaluate, winning_on
 
-MAX_DEPTH = 3
+MAX_DEPTH = 5
 
 IS_MAX_NODE = lambda d: d % 2 == 0
 IS_MIN_NODE = lambda d: d % 2 == 1
@@ -61,21 +61,19 @@ class SearchTree:
 
             # node has an evaluation
             parent = self.parent[board]
-            # maybe prune
-            self.just_pruned = False
-            if self.prunable(board):
-                if repr(board) == "(o,,o,o,xxxx,,)" or repr(self.parent) == "(o,,o,o,xxxx,,)":
-                    self.collect_alpha_beta(board)
-                self.prune(parent)
-                self.just_pruned = True
-                continue
-            # update parent
+            # first update parent, then maybe prune
             overwritten = self.update_parent(board, parent)
             # if parent was overwritten, update alpha/beta
             if overwritten:
                 # if root was overwritten, consider it as the best move
                 if parent == self.root_board:
                     best_move = self.changed_column
+            # maybe prune
+            self.just_pruned = False
+            if self.prunable(board):
+                self.prune(parent)
+                self.just_pruned = True
+                continue
             # remove node from list and get a new one
             self.prune_last()
 

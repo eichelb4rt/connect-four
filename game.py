@@ -4,7 +4,7 @@ from enum import Enum
 from board import Board, STONE_NAMES, winning_on
 from search import SearchTree
 
-LOG = True
+LOG = False
 
 
 class PlayerTypes(Enum):
