@@ -28,13 +28,14 @@ class SearchTree:
         self.worklist_nodes: list[Board] = [root_board]
         self.worklist_depths: list[int] = [0]
         self.worklist_changed: list[int] = [-1]
+        self.expanded_nodes: set[Board] = set()
         self.evaluated: set[Board] = set()
         self.evaluation: dict[Board, float] = {}
         self.parent: dict[Board, Board] = {}
         # depth -> current siblings on that depth
         self.siblings: dict[int, list[Board]] = {0: [root_board]}
         # flag to save if something was pruned
-        self.just_pruned_parents = False
+        self.just_pruned = False
 
     def search(self) -> tuple[float, int]:
         """Evaluates the position. Returns evaluation and best move."""
@@ -60,12 +61,10 @@ class SearchTree:
 
             # node has an evaluation
             # maybe prune
-            self.just_pruned_parents = False
+            self.just_pruned = False
             if self.prunable(board):
-                if repr(board) == "(ooox,,,x,xx,,)" or repr(self.parent[board]) == "(ooox,,,x,xx,,)":
-                    self.collect_alpha_beta(board)
                 self.prune(self.parent[board])
-                self.just_pruned_parents = True
+                self.just_pruned = True
                 continue
             # update parent
             parent = self.parent[board]
@@ -98,11 +97,9 @@ class SearchTree:
         # if all the children were pruned, also prune this node and get a new one
         if self.all_children_pruned(board):
             self.prune_last()
-            # the parents weren't pruned
-            self.just_pruned_parents = False
             return self.get_next()
         # if we're done with all the children, then the node has been fully evaluated
-        if self.all_children_done():
+        if self.all_children_done(board):
             self.evaluated.add(board)
         # if we go back up, we can remove some alphas/betas
         if self.depth < self.previous_depth:
@@ -114,15 +111,13 @@ class SearchTree:
         """Checks if all children of the current board were pruned."""
 
         # if all the children are done but the parent node wasn't overwritten, then all children were pruned
-        return self.all_children_done() and self.evaluation[board] == INIT_NODE(self.depth)
+        return self.all_children_done(board) and self.evaluation[board] == INIT_NODE(self.depth)
 
-    def all_children_done(self) -> bool:
+    def all_children_done(self, board: Board) -> bool:
         """Checks if we just completed visiting all the children."""
 
-        # if we prune and jump up 2, that means we're done with that list of children
-        # if we don't prune, we just jump up 1 and we're also done with that list of children
-        return (not self.just_pruned_parents and self.depth == self.previous_depth - 1) \
-            or (self.just_pruned_parents and self.depth == self.previous_depth - 2)
+        # if we already expanded the node but we find it again, all children are done
+        return board in self.expanded_nodes
 
     def is_leaf(self, board: Board) -> bool:
         """Checks if a board is a leaf. If it is, it is immediately evaluated."""
@@ -162,6 +157,7 @@ class SearchTree:
             self.worklist_nodes.append(child_board)
             self.worklist_depths.append(self.depth + 1)
             self.worklist_changed.append(column)
+        self.expanded_nodes.add(board)
 
     def prunable(self, board: Board) -> bool:
         """Checks if board (and therefore its parent as well) is alpha/beta prunable."""
@@ -179,14 +175,14 @@ class SearchTree:
         del self.worklist_changed[-1]
 
     def prune(self, board: Board):
-        """Prunes a board and all its children from the node list."""
+        """Prunes all chilren of that board from the node list."""
 
         index = self.worklist_nodes.index(board)
         if self.log:
-            print(f"Pruned: {self.worklist_nodes[index:]}")
-        del self.worklist_nodes[index:]
-        del self.worklist_depths[index:]
-        del self.worklist_changed[index:]
+            print(f"Pruned: {self.worklist_nodes[index + 1:]}")
+        del self.worklist_nodes[index + 1:]
+        del self.worklist_depths[index + 1:]
+        del self.worklist_changed[index + 1:]
 
     def update_parent(self, board: Board, parent: Board) -> bool:
         """Updates parent of any node. Returns `True` if it was overwritten."""
@@ -214,7 +210,7 @@ class SearchTree:
             # eval[p] = max(eval[p], eval[board])
             self.evaluation[parent] = self.evaluation[board]
             return True
-        return True
+        return False
 
     def ancestors(self, board: Board) -> list[Board]:
         """Calculates the ancestors of a board (this is also the root path)."""
