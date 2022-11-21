@@ -3,7 +3,7 @@ import numpy as np
 
 from board import Board, evaluate, winning_on
 
-MAX_DEPTH = 3
+MAX_DEPTH = 5
 
 IS_MAX_NODE = lambda d: d % 2 == 0
 IS_MIN_NODE = lambda d: d % 2 == 1
@@ -68,11 +68,17 @@ class SearchTree:
                 self.just_pruned_parents = True
                 continue
             # update parent
-            self.propagate(board)
+            parent = self.parent[board]
+            overwritten = self.update_parent(board, parent)
+            # if parent was overwritten, update alpha/beta
+            if overwritten:
+                # if root was overwritten, consider it as the best move
+                if parent == self.root_board:
+                    best_move = self.changed_column
             # remove node from list and get a new one
             self.prune_last()
 
-        return self.evaluation[self.root_board], self.best_move
+        return self.evaluation[self.root_board], best_move
 
     def get_next(self) -> Board:
         """Gets next node in list and prepares the loop."""
@@ -181,27 +187,11 @@ class SearchTree:
         del self.worklist_nodes[index:]
         del self.worklist_depths[index:]
         del self.worklist_changed[index:]
-    
-    def propagate(self, board: Board):
-        """Propagates updates higher and higher."""
-        
-        depth = self.depth
-        parent = self.parent[board]
-        # while the parent is overwritten, go up
-        while self.update_parent(board, parent, depth):
-            # if root was overwritten, consider it as the best move
-            if parent == self.root_board:
-                self.best_move = self.changed_column
-                return
-            # go 1 up
-            board = parent
-            parent = self.parent[board]
-            depth -= 1
 
-    def update_parent(self, board: Board, parent: Board, depth: int) -> bool:
+    def update_parent(self, board: Board, parent: Board) -> bool:
         """Updates parent of any node. Returns `True` if it was overwritten."""
 
-        if IS_MAX_NODE(depth):
+        if IS_MAX_NODE(self.depth):
             return self.update_max(board, parent)
         else:
             return self.update_min(board, parent)
