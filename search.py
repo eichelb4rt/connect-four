@@ -3,7 +3,7 @@ import numpy as np
 
 from board import Board, evaluate, winning_on
 
-MAX_DEPTH = 4
+MAX_DEPTH = 3
 
 IS_MAX_NODE = lambda d: d % 2 == 0
 IS_MIN_NODE = lambda d: d % 2 == 1
@@ -13,7 +13,8 @@ INIT_NODE = lambda d: -math.inf if IS_MAX_NODE(d) else math.inf
 
 
 class SearchTree:
-    def __init__(self, root_board: Board, player: int):
+    def __init__(self, root_board: Board, player: int, log=False):
+        self.log = log
         self.root_board = root_board
         self.player = player
         # we start at the root with depth = 0
@@ -61,21 +62,17 @@ class SearchTree:
             # maybe prune
             self.just_pruned_parents = False
             if self.prunable(board):
+                if repr(board) == "(ooox,,,x,xx,,)" or repr(self.parent[board]) == "(ooox,,,x,xx,,)":
+                    self.collect_alpha_beta(board)
                 self.prune(self.parent[board])
                 self.just_pruned_parents = True
                 continue
             # update parent
-            parent = self.parent[board]
-            overwritten = self.update_parent(board, parent)
-            # if parent was overwritten, update alpha/beta
-            if overwritten:
-                # if root was overwritten, consider it as the best move
-                if parent == self.root_board:
-                    best_move = self.changed_column
+            self.propagate(board)
             # remove node from list and get a new one
             self.prune_last()
 
-        return self.evaluation[self.root_board], best_move
+        return self.evaluation[self.root_board], self.best_move
 
     def get_next(self) -> Board:
         """Gets next node in list and prepares the loop."""
@@ -179,14 +176,32 @@ class SearchTree:
         """Prunes a board and all its children from the node list."""
 
         index = self.worklist_nodes.index(board)
+        if self.log:
+            print(f"Pruned: {self.worklist_nodes[index:]}")
         del self.worklist_nodes[index:]
         del self.worklist_depths[index:]
         del self.worklist_changed[index:]
+    
+    def propagate(self, board: Board):
+        """Propagates updates higher and higher."""
+        
+        depth = self.depth
+        parent = self.parent[board]
+        # while the parent is overwritten, go up
+        while self.update_parent(board, parent, depth):
+            # if root was overwritten, consider it as the best move
+            if parent == self.root_board:
+                self.best_move = self.changed_column
+                return
+            # go 1 up
+            board = parent
+            parent = self.parent[board]
+            depth -= 1
 
-    def update_parent(self, board: Board, parent: Board) -> bool:
+    def update_parent(self, board: Board, parent: Board, depth: int) -> bool:
         """Updates parent of any node. Returns `True` if it was overwritten."""
 
-        if IS_MAX_NODE(self.depth):
+        if IS_MAX_NODE(depth):
             return self.update_max(board, parent)
         else:
             return self.update_min(board, parent)

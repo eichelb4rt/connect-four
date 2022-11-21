@@ -1,10 +1,10 @@
-import math
 import time
 import numpy as np
 from enum import Enum
-import directions
 from board import Board, STONE_NAMES, winning_on
 from search import SearchTree
+
+LOG = True
 
 
 class PlayerTypes(Enum):
@@ -73,7 +73,7 @@ class Game:
 
         # search game tree for options and maximize evaluation
         start = time.time()
-        tree = SearchTree(self.board, player)
+        tree = SearchTree(self.board, player, log=LOG)
         evaluation, best_move = tree.search()
         end = time.time()
         print(f"Best move evaluation: {evaluation}")
