@@ -7,6 +7,9 @@ MAX_DEPTH = 4
 
 IS_MAX_NODE = lambda d: d % 2 == 0
 IS_MIN_NODE = lambda d: d % 2 == 1
+# maximizer: init with -infty
+# minimizer: init with infty
+INIT_NODE = lambda d: -math.inf if IS_MAX_NODE(d) else math.inf
 
 
 class SearchTree:
@@ -15,7 +18,9 @@ class SearchTree:
         self.player = player
         # we start at the root with depth = 0
         self.depth = 0
+        # max over min nodes
         self.alpha = -math.inf
+        # min over max nodes
         self.beta = math.inf
         # stores node ids and their depth in the search tree, and the column that was changed
         # root did not change any position
@@ -25,22 +30,22 @@ class SearchTree:
         self.evaluated: set[Board] = set()
         self.evaluation: dict[Board, float] = {}
         self.parent: dict[Board, Board] = {}
-        # depth -> maximum evaluation of min nodes in that depth (only odd depths)
-        self.alphas: dict[int, float] = {}
-        # depth -> minimum evaluation of max nodes in that depth (only even depths)
-        self.betas: dict[int, float] = {0: math.inf}
+        # depth -> current siblings on that depth
+        self.siblings: dict[int, list[Board]] = {0: [root_board]}
         # flag to save if something was pruned
-        self.just_pruned = False
+        self.just_pruned_parents = False
 
     def search(self) -> tuple[float, int]:
-        while self.root_board not in self.evaluated:
-            board, changed_column = self.prepare()
+        """Evaluates the position. Returns evaluation and best move."""
+
+        # get the next board as long as the root board isn't evaluated
+        while (board := self.get_next()) and self.root_board not in self.evaluated:
             # if the node was not evaluated yet:
             # - but it's a leaf or we don't want to expand it, evaluate it now
             # - else add children and start over
             if board not in self.evaluated:
                 # if x is a leaf, evaluate it and go on
-                if self.is_leaf(board, changed_column):
+                if self.is_leaf(board):
                     continue
                 # if we don't want to expand the node, evaluate it using the evaluation function
                 if self.depth >= MAX_DEPTH:
@@ -48,58 +53,82 @@ class SearchTree:
                     self.evaluated.add(board)
                     continue
                 # we want to expand
-                # maximizer: init with -infty
-                # minimizer: init with infty
-                self.evaluation[board] = -math.inf if IS_MAX_NODE(self.depth) else math.inf
+                self.evaluation[board] = INIT_NODE(self.depth)
                 self.expand(board)
                 continue
 
             # node has an evaluation
+            # maybe prune
+            self.just_pruned_parents = False
+            if self.prunable(board):
+                self.prune(self.parent[board])
+                self.just_pruned_parents = True
+                continue
+            # update parent
+            parent = self.parent[board]
+            overwritten = self.update_parent(board, parent)
+            # if parent was overwritten, update alpha/beta
+            if overwritten:
+                # if root was overwritten, consider it as the best move
+                if parent == self.root_board:
+                    best_move = self.changed_column
             # remove node from list and get a new one
-            # board in max node -> parent in min node
-            if IS_MAX_NODE(self.depth):
-                self.update_max(board, changed_column)
-            # board in min node -> parent in max node
-            else:
-                self.update_min(board, changed_column)
+            self.prune_last()
 
-        return self.evaluation[self.root_board], self.best_move
+        return self.evaluation[self.root_board], best_move
 
-    def prepare(self) -> tuple[Board, int]:
+    def get_next(self) -> Board:
+        """Gets next node in list and prepares the loop."""
+
         # save previous depth so we know when we go back up
         self.previous_depth = self.depth
         # pop top node, depth, changed position
         board = self.worklist_nodes[-1]
         self.depth = self.worklist_depths[-1]
-        changed_column = self.worklist_changed[-1]
+        self.changed_column = self.worklist_changed[-1]
         # maximizer (even depth): it's my players turn
         # minimizer (odd depth): it's the enemy players turn
         self.on_turn = self.player if self.depth % 2 == 0 else -self.player
-        self.combine_alpha_beta()
-        # if we just went back up in the search tree, then the node has been fully evaluated, check the loop condition again maybe
+        # if we change the depth in any way, the alphas/betas may have to be updated
+        if self.depth != self.previous_depth:
+            self.collect_alpha_beta(board)
+        # if all the children were pruned, also prune this node and get a new one
+        if self.all_children_pruned(board):
+            self.prune_last()
+            # the parents weren't pruned
+            self.just_pruned_parents = False
+            return self.get_next()
+        # if we're done with all the children, then the node has been fully evaluated
+        if self.all_children_done():
+            self.evaluated.add(board)
+        # if we go back up, we can remove some alphas/betas
         if self.depth < self.previous_depth:
-            # if we prune and jump up 2, that means we're done with that list of children
-            # if we don't prune, we just jump up 1 and we're also done with that list of children
-            if self.children_done():
-                self.evaluated.add(board)
-            self.just_pruned = False
-            self.clean_alpha_beta()
-            # if we just changed depth, do it again because we changed some stuff now
-            return self.prepare()
-        # if we enter a new depth, we'll have to init the new alpha / beta
-        elif self.depth > self.previous_depth:
-            self.init_alpha_beta()
-        return board, changed_column
+            self.clean_siblings()
+        # update if we just pruned
+        return board
 
-    def children_done(self) -> bool:
-        return not self.just_pruned or (self.just_pruned and self.depth == self.previous_depth - 2)
+    def all_children_pruned(self, board: Board) -> bool:
+        """Checks if all children of the current board were pruned."""
 
-    def is_leaf(self, board: Board, changed_column: int) -> bool:
+        # if all the children are done but the parent node wasn't overwritten, then all children were pruned
+        return self.all_children_done() and self.evaluation[board] == INIT_NODE(self.depth)
+
+    def all_children_done(self) -> bool:
+        """Checks if we just completed visiting all the children."""
+
+        # if we prune and jump up 2, that means we're done with that list of children
+        # if we don't prune, we just jump up 1 and we're also done with that list of children
+        return (not self.just_pruned_parents and self.depth == self.previous_depth - 1) \
+            or (self.just_pruned_parents and self.depth == self.previous_depth - 2)
+
+    def is_leaf(self, board: Board) -> bool:
+        """Checks if a board is a leaf. If it is, it is immediately evaluated."""
+
         # root didn't change any column, it can't be a leaf.
         if board == self.root_board:
             return False
         # see if board is a leaf. If yes, evaluate it.
-        x, y = changed_column, board.top[changed_column] - 1
+        x, y = self.changed_column, board.top[self.changed_column] - 1
         stone_position = np.array([y, x])
         if winning_on(board, self.player, stone_position):
             self.evaluation[board] = 1
@@ -112,7 +141,10 @@ class SearchTree:
         return False
 
     def expand(self, board: Board):
-        # generate children and add them to the lists
+        """Adds all possible children to node list."""
+
+        # generate children and add them to the lists]
+        self.siblings[self.depth + 1] = []
         for column in range(self.root_board.width):
             # skip full columns
             if board.full(column):
@@ -123,91 +155,124 @@ class SearchTree:
             # assign an id to the child board
             self.parent[child_board] = board
             # add child to node list
+            self.siblings[self.depth + 1].append(child_board)
             self.worklist_nodes.append(child_board)
             self.worklist_depths.append(self.depth + 1)
             self.worklist_changed.append(column)
 
+    def prunable(self, board: Board) -> bool:
+        """Checks if board (and therefore its parent as well) is alpha/beta prunable."""
+
+        if IS_MAX_NODE(self.depth):
+            return self.evaluation[board] <= self.alpha
+        else:
+            return self.evaluation[board] >= self.beta
+
+    def prune_last(self):
+        """Remove the last node from the node list, so we can visit a new one."""
+
+        del self.worklist_nodes[-1]
+        del self.worklist_depths[-1]
+        del self.worklist_changed[-1]
+
     def prune(self, board: Board):
+        """Prunes a board and all its children from the node list."""
+
         index = self.worklist_nodes.index(board)
-        print(f"Pruned: {self.worklist_nodes[index:]}")
         del self.worklist_nodes[index:]
         del self.worklist_depths[index:]
         del self.worklist_changed[index:]
-        self.just_pruned = True
 
-    def update_max(self, board: Board, changed_column: int):
-        p = self.parent[board]
-        # update betas in the depth
-        self.betas[self.depth] = min(self.betas[self.depth], self.evaluation[board])
-        # if outcome is limited by alpha, cut the whole family
-        if self.evaluation[board] >= self.beta:
-            print(f"beta: {self.beta}")
-            self.prune(p)
-            return
-        # overwrite parent
-        if self.evaluation[board] < self.evaluation[p]:
-            self.evaluation[p] = self.evaluation[board]
-            # update parent alpha
-            self.alphas[self.depth - 1] = max(self.alphas[self.depth - 1], self.evaluation[p])
-            if p == self.root_board:
-                self.best_move = changed_column
-        # remove board from node list
-        del self.worklist_nodes[-1]
-        del self.worklist_depths[-1]
-        del self.worklist_changed[-1]
+    def update_parent(self, board: Board, parent: Board) -> bool:
+        """Updates parent of any node. Returns `True` if it was overwritten."""
 
-    def update_min(self, board: Board, changed_column: int):
-        p = self.parent[board]
-        # update alphas in the depth
-        self.alphas[self.depth] = max(self.alphas[self.depth], self.evaluation[board])
-        # if outcome is limited by beta, cut the whole family
-        if self.evaluation[board] <= self.alpha:
-            print(f"alpha: {self.alpha}")
-            self.prune(p)
-            return
-        # overwrite parent
-        if self.evaluation[board] > self.evaluation[p]:
-            self.evaluation[p] = self.evaluation[board]
-            # update parent beta
-            self.betas[self.depth - 1] = min(self.betas[self.depth - 1], self.evaluation[p])
-            if p == self.root_board:
-                self.best_move = changed_column
-        # remove board from node list
-        del self.worklist_nodes[-1]
-        del self.worklist_depths[-1]
-        del self.worklist_changed[-1]
-
-    def init_alpha_beta(self):
-        if IS_MIN_NODE(self.depth):
-            self.alphas[self.depth] = -math.inf
+        if IS_MAX_NODE(self.depth):
+            return self.update_max(board, parent)
         else:
-            self.betas[self.depth] = math.inf
+            return self.update_min(board, parent)
 
-    def combine_alpha_beta(self):
-        # if we change the depth in any way, the alphas/betas may have to be updated
-        if self.depth != self.previous_depth:
-            if IS_MIN_NODE(self.depth):
-                self.alpha = self.combine_alphas()
-            else:
-                self.beta = self.combine_betas()
+    def update_max(self, board: Board, parent: Board) -> bool:
+        """Updates the parent of a max node. Returns `True` if it was overwritten."""
 
-    def clean_alpha_beta(self):
-        # also, we can forget about the alpha/beta 2 depths below
-        if IS_MIN_NODE(self.depth) and self.depth + 2 in self.alphas:
-            del self.alphas[self.depth + 2]
-        elif IS_MAX_NODE(self.depth) and self.depth + 2 in self.betas:
-            del self.betas[self.depth + 2]
+        # board in max node -> parent in min node
+        if self.evaluation[board] < self.evaluation[parent]:
+            # eval[p] = min(eval[p], eval[board])
+            self.evaluation[parent] = self.evaluation[board]
+            return True
+        return False
 
-    def combine_alphas(self) -> float:
+    def update_min(self, board: Board, parent: Board) -> bool:
+        """Updates the parent of a min node. Returns `True` if it was overwritten."""
+
+        # board in min node -> parent in max node
+        if self.evaluation[board] > self.evaluation[parent]:
+            # eval[p] = max(eval[p], eval[board])
+            self.evaluation[parent] = self.evaluation[board]
+            return True
+        return True
+
+    def ancestors(self, board: Board) -> list[Board]:
+        """Calculates the ancestors of a board (this is also the root path)."""
+
+        ancestors: list[Board] = []
+        node = board
+        # while the node has a parent
+        while node in self.parent:
+            ancestors.append(node)
+            node = self.parent[node]
+        # all ancestors but root appended. root is ancestor to all.
+        ancestors.append(self.root_board)
+        return ancestors
+
+    def clean_siblings(self):
+        """Cleans up siblings that are no longer needed."""
+
+        del self.siblings[self.depth + 1]
+        # if we just pruned, then we might have jumped.
+        if self.depth + 2 in self.siblings:
+            del self.siblings[self.depth + 2]
+
+    def collect_alpha_beta(self, board: Board):
+        """Combines alpha/beta of the layers above into 1 value."""
+
+        if IS_MAX_NODE(self.depth):
+            self.alpha = self.collect_alpha(board)
+        else:
+            self.beta = self.collect_beta(board)
+
+    def collect_alpha(self, board: Board) -> float:
+        ancestors = self.ancestors(board)
         # only odd depths
         alpha = -math.inf
         for depth in range(1, self.depth, 2):
-            alpha = max(alpha, self.alphas[depth])
+            siblings = self.siblings[depth]
+            for sibling in siblings:
+                # not a sibling, but an ancestor
+                if sibling in ancestors:
+                    continue
+                # not a useful evaluation yet
+                if sibling not in self.evaluation:
+                    continue
+                if self.evaluation[sibling] == INIT_NODE(depth):
+                    continue
+                # actual evaluation and actual sibling
+                alpha = max(alpha, self.evaluation[sibling])
         return alpha
 
-    def combine_betas(self) -> float:
+    def collect_beta(self, board: Board) -> float:
+        ancestors = self.ancestors(board)
         # only even depths
         beta = math.inf
         for depth in range(0, self.depth, 2):
-            beta = min(beta, self.betas[depth])
+            for sibling in self.siblings[depth]:
+                # not a sibling, but an ancestor
+                if sibling in ancestors:
+                    continue
+                # not a useful evaluation yet
+                if sibling not in self.evaluation:
+                    continue
+                if self.evaluation[sibling] == INIT_NODE(depth):
+                    continue
+                # actual evaluation and actual sibling
+                beta = min(beta, self.evaluation[sibling])
         return beta
