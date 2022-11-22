@@ -98,7 +98,7 @@ class Game:
 
 
 def main():
-    game = Game()
+    game = Game(player1_type=PlayerTypes.NPC, player2_type=PlayerTypes.NPC)
     result = game.play()
     print(result.value)
 

@@ -132,6 +132,8 @@ def evaluate(board: Board, player: int, on_turn: int) -> float:
         player_score += player_stones
         enemy_score += enemy_stones
     # 1 if player got all the scores, -1 if enemy got all the scores
+    if player_score + enemy_score == 0:
+        return 0
     return (player_score - enemy_score) / (player_score + enemy_score)
 
 

@@ -3,7 +3,7 @@ import numpy as np
 
 from board import Board, evaluate, winning_on
 
-MAX_DEPTH = 5
+MAX_DEPTH = 4
 
 IS_MAX_NODE = lambda d: d % 2 == 0
 IS_MIN_NODE = lambda d: d % 2 == 1
@@ -33,7 +33,7 @@ class SearchTree:
         self.evaluation: dict[Board, float] = {}
         self.parent: dict[Board, Board] = {}
         # depth -> current siblings on that depth
-        self.siblings: dict[int, list[Board]] = {0: [root_board]}
+        self.siblings: list[list[Board]] = [[root_board]]
         # flag to save if something was pruned
         self.just_pruned = False
 
@@ -60,24 +60,17 @@ class SearchTree:
                 continue
 
             # node has an evaluation
-            parent = self.parent[board]
-            # first update parent, then maybe prune
-            overwritten = self.update_parent(board, parent)
-            # if parent was overwritten, update alpha/beta
-            if overwritten:
-                # if root was overwritten, consider it as the best move
-                if parent == self.root_board:
-                    best_move = self.changed_column
+            self.propagate(board)
             # maybe prune
             self.just_pruned = False
             if self.prunable(board):
-                self.prune(parent)
+                self.prune(self.parent[board])
                 self.just_pruned = True
                 continue
             # remove node from list and get a new one
             self.prune_last()
 
-        return self.evaluation[self.root_board], best_move
+        return self.evaluation[self.root_board], self.best_move
 
     def get_next(self) -> Board:
         """Gets next node in list and prepares the loop."""
@@ -96,6 +89,7 @@ class SearchTree:
             self.collect_alpha_beta(board)
         # if all the children were pruned, also prune this node and get a new one
         if self.all_children_pruned(board):
+            self.propagate(board)
             self.prune_last()
             return self.get_next()
         # if we're done with all the children, then the node has been fully evaluated
@@ -142,7 +136,7 @@ class SearchTree:
         """Adds all possible children to node list."""
 
         # generate children and add them to the lists]
-        self.siblings[self.depth + 1] = []
+        self.siblings.append([])
         for column in range(self.root_board.width):
             # skip full columns
             if board.full(column):
@@ -183,6 +177,17 @@ class SearchTree:
         del self.worklist_nodes[index:]
         del self.worklist_depths[index:]
         del self.worklist_changed[index:]
+
+    def propagate(self, board: Board):
+        """Propagates the evaluation of the board up by 1 (remembers best move if parent is root)."""
+
+        parent = self.parent[board]
+        overwritten = self.update_parent(board, parent)
+        # if parent was overwritten, updte alpha/beta
+        if overwritten:
+            # if root was overwritten, consider it as the best move
+            if parent == self.root_board:
+                self.best_move = self.changed_column
 
     def update_parent(self, board: Board, parent: Board) -> bool:
         """Updates parent of any node. Returns `True` if it was overwritten."""
@@ -228,10 +233,7 @@ class SearchTree:
     def clean_siblings(self):
         """Cleans up siblings that are no longer needed."""
 
-        del self.siblings[self.depth + 1]
-        # if we just pruned, then we might have jumped.
-        if self.depth + 2 in self.siblings:
-            del self.siblings[self.depth + 2]
+        del self.siblings[self.depth + 1:]
 
     def collect_alpha_beta(self, board: Board):
         """Combines alpha/beta of the layers above into 1 value."""
@@ -246,8 +248,7 @@ class SearchTree:
         # only odd depths
         alpha = -math.inf
         for depth in range(1, self.depth, 2):
-            siblings = self.siblings[depth]
-            for sibling in siblings:
+            for sibling in self.siblings[depth]:
                 # not a sibling, but an ancestor
                 if sibling in ancestors:
                     continue
